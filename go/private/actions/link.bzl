@@ -179,6 +179,14 @@ def emit_link(
     inputs_direct = stamp_inputs + [go.sdk.package_list]
     if go.coverage_enabled and go.coverdata:
         inputs_direct.append(go.coverdata.data.file)
+
+    # Add orchestrion for toolexec instrumentation if enabled
+    if go.orchestrion:
+        builder_args.add("-orchestrion", go.orchestrion)
+        inputs_direct.append(go.orchestrion)
+        # Orchestrion needs the go binary to run `go env GOMOD`
+        inputs_direct.append(go.sdk.go)
+
     inputs_transitive = [
         archive.libs,
         archive.cgo_deps,

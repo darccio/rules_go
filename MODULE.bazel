@@ -32,6 +32,12 @@ use_repo(
 
 register_toolchains("@go_toolchains//:all")
 
+# Orchestrion extension for compile-time instrumentation.
+# By default, this creates an empty rules_go_orchestrion_tool repo.
+# Projects that want orchestrion can provide their own repo with the same name.
+orchestrion = use_extension("//go:extensions.bzl", "orchestrion")
+use_repo(orchestrion, "rules_go_orchestrion_tool")
+
 bazel_dep(name = "gazelle", version = "0.36.0")
 
 go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")

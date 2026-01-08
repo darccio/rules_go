@@ -46,7 +46,9 @@ func compilePkg(args []string) error {
 	var gcFlags, asmFlags, cppFlags, cFlags, cxxFlags, objcFlags, objcxxFlags, ldFlags quoteMultiFlag
 	var coverFormat string
 	var pgoprofile string
+	var orchestrion string
 	fs.StringVar(&pack, "pack", "", "Path of the pack tool.")
+	fs.StringVar(&orchestrion, "orchestrion", "", "Path to orchestrion binary for toolexec instrumentation")
 	fs.Var(&unfilteredSrcs, "src", ".go, .c, .cc, .m, .mm, .s, or .S file to be filtered and compiled")
 	fs.Var(&coverSrcs, "cover", ".go file that should be instrumented for coverage (must also be a -src)")
 	fs.Var(&embedSrcs, "embedsrc", "file that may be compiled into the package with a //go:embed directive")
@@ -135,7 +137,8 @@ func compilePkg(args []string) error {
 		cgoGoSrcsPath,
 		coverFormat,
 		recompileInternalDeps,
-		pgoprofile)
+		pgoprofile,
+		orchestrion)
 }
 
 func compileArchive(
@@ -168,6 +171,7 @@ func compileArchive(
 	coverFormat string,
 	recompileInternalDeps []string,
 	pgoprofile string,
+	orchestrion string,
 ) error {
 	workDir, cleanup, err := goenv.workDir()
 	if err != nil {
@@ -442,7 +446,7 @@ func compileArchive(
 	}
 
 	// Compile the filtered .go files.
-	if err := compileGo(goenv, goSrcs, packagePath, importcfgPath, embedcfgPath, asmHdrPath, symabisPath, gcFlags, pgoprofile, outLinkObj, outInterfacePath, coverageCfg); err != nil {
+	if err := compileGo(goenv, goSrcs, packagePath, importcfgPath, embedcfgPath, asmHdrPath, symabisPath, gcFlags, pgoprofile, outLinkObj, outInterfacePath, coverageCfg, orchestrion); err != nil {
 		return err
 	}
 
@@ -529,9 +533,14 @@ func checkImportsAndBuildCfg(goenv *env, importPath string, srcs archiveSrcs, de
 	return importcfgPath, nil
 }
 
-func compileGo(goenv *env, srcs []string, packagePath, importcfgPath, embedcfgPath, asmHdrPath, symabisPath string, gcFlags []string, pgoprofile, outLinkobjPath, outInterfacePath, coverageCfg string) error {
-	args := goenv.goTool("compile")
+func compileGo(goenv *env, srcs []string, packagePath, importcfgPath, embedcfgPath, asmHdrPath, symabisPath string, gcFlags []string, pgoprofile, outLinkobjPath, outInterfacePath, coverageCfg, orchestrion string) error {
+	args := goenv.goToolWithOrchestion(orchestrion, "compile")
 	args = append(args, "-p", packagePath, "-importcfg", importcfgPath, "-pack")
+	// Add a buildid when using orchestrion - it needs this for its NBT caching
+	if orchestrion != "" {
+		buildID := fmt.Sprintf("%x", sha256.Sum256([]byte(packagePath+outLinkobjPath)))[:16]
+		args = append(args, "-buildid", buildID)
+	}
 	if embedcfgPath != "" {
 		args = append(args, "-embedcfg", embedcfgPath)
 	}
@@ -553,7 +562,44 @@ func compileGo(goenv *env, srcs []string, packagePath, importcfgPath, embedcfgPa
 	args = append(args, "--")
 	args = append(args, srcs...)
 	absArgs(args, []string{"-I", "-o", "-importcfg"})
-	return goenv.runCommand(args)
+
+	// Orchestrion requires a go.mod file - create a temporary one if needed
+	// Also look for orchestrion.yml in source directories
+	if orchestrion != "" {
+		srcDirs := make([]string, 0, len(srcs))
+		seen := make(map[string]bool)
+		for _, src := range srcs {
+			dir := filepath.Dir(src)
+			// Get absolute path to handle symlinks properly
+			if absDir, err := filepath.Abs(dir); err == nil {
+				// Also resolve symlinks to find the real source directory
+				if realDir, err := filepath.EvalSymlinks(absDir); err == nil {
+					dir = realDir
+				} else {
+					dir = absDir
+				}
+			}
+			if !seen[dir] {
+				seen[dir] = true
+				srcDirs = append(srcDirs, dir)
+			}
+		}
+		cleanupGoMod, err := ensureGoModExists(srcDirs, goenv.verbose)
+		if err != nil {
+			return fmt.Errorf("compilepkg: %w", err)
+		}
+		defer cleanupGoMod()
+	}
+
+	// Start orchestrion jobserver if needed
+	jobserver, err := startOrchestrionJobserver(orchestrion, goenv.sdk, goenv.verbose)
+	if err != nil {
+		return fmt.Errorf("compilepkg: failed to start orchestrion jobserver: %w", err)
+	}
+	defer jobserver.cleanup()
+
+	// Pass packagePath as the import path for TOOLEXEC_IMPORTPATH
+	return goenv.runCommandWithJobserver(args, jobserver, packagePath)
 }
 
 func appendToArchive(goenv *env, pack, outPath string, objFiles []string) error {

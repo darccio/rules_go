@@ -130,6 +130,18 @@ func (e *env) goTool(tool string, args ...string) []string {
 	return append([]string{toolPath}, args...)
 }
 
+// goToolWithOrchestion returns a slice containing the command to run a Go tool,
+// optionally wrapped with orchestrion toolexec when orchestrionPath is non-empty.
+// This is used to enable Orchestrion's compile-time instrumentation.
+func (e *env) goToolWithOrchestion(orchestrionPath, tool string, args ...string) []string {
+	toolArgs := e.goTool(tool, args...)
+	if orchestrionPath != "" {
+		// Prepend orchestrion toolexec to wrap the Go tool
+		return append([]string{orchestrionPath, "toolexec"}, toolArgs...)
+	}
+	return toolArgs
+}
+
 // goCmd returns a slice containing the path to the go executable
 // and additional arguments.
 func (e *env) goCmd(cmd string, args ...string) []string {
@@ -150,6 +162,22 @@ func (e *env) runCommand(args []string) error {
 	cmd.Stdout = buf
 	cmd.Stderr = buf
 	err := runAndLogCommand(cmd, e.verbose)
+	os.Stderr.Write(relativizePaths(buf.Bytes()))
+	return err
+}
+
+// runCommandWithJobserver executes a subprocess with the orchestrion jobserver
+// URL set in the environment if a jobserver is provided. If importPath is non-empty,
+// TOOLEXEC_IMPORTPATH is also set for orchestrion. The Go SDK's bin directory
+// is prepended to PATH so orchestrion can find the `go` binary.
+func (e *env) runCommandWithJobserver(args []string, jobserver *orchestrionJobserver, importPath string) error {
+	cmd := exec.Command(args[0], args[1:]...)
+	buf := &bytes.Buffer{}
+	cmd.Stdout = buf
+	cmd.Stderr = buf
+	// Make SDK path absolute so child processes can find `go`
+	sdkPath := abs(e.sdk)
+	err := executeCommandWithJobserver(cmd, jobserver, importPath, sdkPath, e.verbose)
 	os.Stderr.Write(relativizePaths(buf.Bytes()))
 	return err
 }
