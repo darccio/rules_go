@@ -13,5 +13,7 @@
 # limitations under the License.
 
 load("//go/private:extensions.bzl", _go_sdk = "go_sdk")
+load("//go/private/orchestrion:extensions.bzl", _orchestrion_ext = "orchestrion_ext")
 
 go_sdk = _go_sdk
+orchestrion = _orchestrion_ext

@@ -45,6 +45,8 @@ func link(args []string) error {
 	main := flags.String("main", "", "Path to the main archive.")
 	packagePath := flags.String("p", "", "Package path of the main archive.")
 	outFile := flags.String("o", "", "Path to output file.")
+	orchestrion := flags.String("orchestrion", "", "Path to orchestrion binary (unused for link, but kept for API compatibility)")
+	_ = orchestrion // Orchestrion is not used for link step, see comment in link command generation
 	flags.Var(&archives, "arc", "Label, package path, and file name of a dependency, separated by '='")
 	packageList := flags.String("package_list", "", "The file containing the list of standard library packages")
 	buildmode := flags.String("buildmode", "", "Build mode used.")
@@ -100,6 +102,12 @@ func link(args []string) error {
 	}
 
 	// generate any additional link options we need
+	// Note: We do NOT use orchestrion for link because:
+	// 1. Orchestrion's instrumentation happens at compile time, not link time
+	// 2. Orchestrion's link processing tries to read link.deps from all packages
+	//    in importcfg, but rules_go doesn't build all Go toolchain packages
+	// 3. In Bazel, dependencies are explicitly managed, so we don't need
+	//    orchestrion's dependency resolution during linking
 	goargs := goenv.goTool("link")
 	goargs = append(goargs, "-importcfg", importcfgName)
 
@@ -170,6 +178,8 @@ func link(args []string) error {
 		os.Setenv("GOROOT", "GOROOT")
 		defer os.Setenv("GOROOT", oldroot)
 	}
+
+	// Run the link command directly (orchestrion is not used for link step)
 	if err := goenv.runCommand(goargs); err != nil {
 		return err
 	}

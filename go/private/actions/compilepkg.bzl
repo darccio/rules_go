@@ -198,6 +198,13 @@ def emit_compilepkg(
         compile_args.add("-pgoprofile", go.mode.pgoprofile)
         inputs_direct.append(go.mode.pgoprofile)
 
+    # Add orchestrion for toolexec instrumentation if enabled
+    if go.orchestrion:
+        compile_args.add("-orchestrion", go.orchestrion)
+        inputs_direct.append(go.orchestrion)
+        # Orchestrion needs the go binary to run `go env GOMOD`
+        inputs_direct.append(sdk.go)
+
     go.actions.run(
         inputs = depset(inputs_direct, transitive = inputs_transitive),
         outputs = outputs,

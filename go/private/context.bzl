@@ -653,6 +653,7 @@ def go_context(
         cgo_tools = cgo_tools,
         nogo = go_context_info.nogo if go_context_info else None,
         coverdata = go_context_info.coverdata if go_context_info else None,
+        orchestrion = go_context_info.orchestrion if go_context_info else None,
         coverage_enabled = ctx.configuration.coverage_enabled,
         coverage_instrumented = ctx.coverage_instrumented(),
         export_stdlib = go_config_info.export_stdlib,
@@ -690,10 +691,20 @@ def _go_context_data_impl(ctx):
         print("WARNING: --features=race is no longer supported. Use --@io_bazel_rules_go//go/config:race instead.")
     if "msan" in ctx.features:
         print("WARNING: --features=msan is no longer supported. Use --@io_bazel_rules_go//go/config:msan instead.")
+
+    # Get orchestrion binary if enabled
+    orchestrion_enabled = ctx.attr._orchestrion_enabled[BuildSettingInfo].value
+    orchestrion = None
+    if orchestrion_enabled:
+        orchestrion_files = ctx.attr._orchestrion_tool_binary.files.to_list()
+        if orchestrion_files:
+            orchestrion = orchestrion_files[0]
+
     providers = [
         GoContextInfo(
             coverdata = ctx.attr.coverdata[0][GoArchive],
             nogo = ctx.attr.nogo[DefaultInfo].files_to_run,
+            orchestrion = orchestrion,
         ),
         ctx.attr.stdlib[GoStdLib],
         ctx.attr.go_config[GoConfigInfo],
@@ -725,6 +736,15 @@ go_context_data = rule(
         ),
         "_allowlist_function_transition": attr.label(
             default = "@bazel_tools//tools/allowlists/function_transition_allowlist",
+        ),
+        "_orchestrion_enabled": attr.label(
+            default = "//go/private/orchestrion:enabled",
+            providers = [BuildSettingInfo],
+        ),
+        "_orchestrion_tool_binary": attr.label(
+            default = "//go/private/orchestrion:tool_binary",
+            allow_files = True,
+            cfg = "exec",
         ),
     },
     doc = """go_context_data gathers information about the build configuration.
